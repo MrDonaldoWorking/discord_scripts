@@ -26,8 +26,13 @@ reduce_image() {
     mkdir -p "$dir/reduced"
 
     # Resize the image
-    sips -Z $new_size --out "$dir/reduced" "$dir/$file"
-    echo "Resized $file to ${new_width}x${new_height}"
+    sips -Z $new_size --out "$dir/reduced" "$dir/$file" > /dev/null 2>&1
+    # echo "Resized $file to ${new_width}x${new_height}"
+}
+
+get_file_size() {
+    local file="$1"
+    echo $(ls -l "$file" | cut -d ' ' -f 8)
 }
 
 # Check if the Swift binary exists
@@ -57,14 +62,25 @@ mkdir -p "${pdf_dir}/${current_datetime}"
 blacklist_file="${pdf_dir}/blacklist.txt"
 declare -A folder_blacklist
 declare -A partial_blacklist
+declare -A redirect_map
 
 if [[ -f "$blacklist_file" ]]; then
     echo "Found blacklist file: $blacklist_file"
     while IFS= read -r line; do
         # Skip empty lines and comments
         [[ -z "$line" || "$line" == \#* ]] && continue
-        
-        if [[ "$line" == *:* ]]; then
+
+        if [[ "$line" == *" -> "*:* ]]; then
+            # Redirect entry: <Folder1> -> <Folder2>: <Image1> <Image2> ...
+            source_folder=${line%%" -> "*}
+            rest=${line#*" -> "}
+            target_folder=${rest%%:*}
+            files=${rest#*:}
+
+            # Store the redirect mapping
+            key="${source_folder}:${target_folder}"
+            redirect_map[$key]="${files## }" # Trim leading space
+        elif [[ "$line" == *:* ]]; then
             # Partial blacklist entry
             folder=${line%%:*}
             files=${line#*:}
@@ -78,6 +94,32 @@ else
     echo "Warning: No blacklist.txt found in $pdf_dir"
     echo "Continuing without blacklist filtering"
 fi
+
+# Redirect all possible files
+for key in "${(@k)redirect_map}"; do
+    source_folder=${key%%:*}
+    target_folder=${key#*:}
+
+    source_dir="${root_dir}/${source_folder}"
+    target_dir="${root_dir}/${target_folder}"
+    if [[ -d "$source_dir" ]]; then
+        echo "Creating ${root_dir}/${target_folder} if it not exists"
+        mkdir -p "${root_dir}/${target_folder}"
+
+        files_to_redirect=(${=redirect_map[$key]})
+        for file_to_redirect in "${files_to_redirect[@]}"; do
+            source_file="${source_dir}/${file_to_redirect}"
+            if [[ -f "$source_file" ]]; then
+                echo "Apply redirect $source_folder -> $target_folder: $file_to_redirect"
+                mv "${source_dir}/${file_to_redirect}" "${target_dir}"
+            else
+                echo "There is no $file_to_redirect in $source_dir"
+            fi
+        done
+    else
+        echo "There is no $source_folder directory! Redirect rule is ignored"
+    fi
+done
 
 # Process each child directory
 for dir in "$root_dir"/*/; do
@@ -146,9 +188,9 @@ for dir in "$root_dir"/*/; do
     # Call the Swift binary
     (
         export CG_PDF_VERBOSE=1
-        echo "=== ~/discord_scripts/createpdf.o ${args[@]}"
+        # echo "=== ~/discord_scripts/createpdf.o ${args[@]}"
         ~/discord_scripts/createpdf.o ${args[@]}
-    )
+    ) > /dev/null 2>&1
 
     # Check result
     if [[ $? -eq 0 ]] && [[ -f "$pdf_path" ]]; then
@@ -157,5 +199,46 @@ for dir in "$root_dir"/*/; do
         echo "Error creating PDF for $dir_name"
     fi
 done
+
+# Compare with previous result if exists
+previous_results=(${(O)${(f)"$(find "${pdf_dir}" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z -r | tr '\0' '\n')"}})
+if (( ${#previous_results[@]} > 1 )); then  # Current + at least one previous
+    # Sort by creation time (newest first) and get the second one (previous)
+    previous_dir=(${previous_results[2]})
+    current_dir="${pdf_dir}/${current_datetime}"
+
+    echo "\nComparing with previous results in: ${previous_dir##*/}"
+
+    # Find all PDFs in current directory
+    for pdf in "${current_dir}"/*.pdf(N); do
+        pdf_name="${pdf##*/}"
+        previous_pdf="${previous_dir}/${pdf_name}"
+
+        if [[ -f "$previous_pdf" ]]; then
+            current_pdf_size=$(get_file_size "$pdf")
+            previous_pdf_size=$(get_file_size "$previous_pdf")
+            if [[ "$current_pdf_size" == "$previous_pdf_size" ]]; then
+                echo "  Removing duplicate: $pdf_name (identical to previous)"
+                rm "$pdf"
+            else
+                echo "  Keeping modified: $pdf_name (differs from previous)"
+            fi
+        fi
+    done
+
+    # Check if current directory is empty after comparison
+    if [[ -z "$(ls -A "${current_dir}")" ]]; then
+        echo "\nNo unique PDFs remain in current result - removing directory"
+        rmdir "${current_dir}"
+        
+        # Check if pdf_dir is now empty
+        if [[ -z "$(ls -A "${pdf_dir}")" ]]; then
+            echo "PDF output directory is empty - removing it"
+            rmdir "${pdf_dir}"
+        fi
+    fi
+else
+    echo "There is no previous result, do not compare"
+fi
 
 echo "PDF creation complete"
