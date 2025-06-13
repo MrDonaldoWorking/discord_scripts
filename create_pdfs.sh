@@ -52,7 +52,7 @@ if [[ ! -d "$root_dir" ]]; then
     exit 1
 fi
 
-find "${root_dir}" -type d -name 'reduced' -print -delete
+find "${root_dir}" -type d -name 'reduced' -print -exec rm -r {} \;
 
 mkdir -p "${pdf_dir}"
 current_datetime=$(date +%Y-%m-%dT%H:%M:%S)
