@@ -1,5 +1,4 @@
 #!/usr/bin/env python3.9
-import os
 import sys
 import argparse
 import shutil
@@ -75,6 +74,7 @@ def analyze_directories(root_dir: Path, remove_duplicates: bool, merge: bool, pr
                         merge_candidates[target] = []
                     merge_candidates[target].append(source)
 
+    removed_directories = set()
     # Output results
     print(f"\nAnalyzing directory structure of: {root_dir}")
     print("-------------------------------------------")
@@ -90,7 +90,9 @@ def analyze_directories(root_dir: Path, remove_duplicates: bool, merge: bool, pr
             print("\nRemoving duplicate directories:")
             for duplicate, _ in duplicate_info:
                 print(f"  Deleting {duplicate}")
-                shutil.rmtree(duplicate)
+                if duplicate not in removed_directories:
+                    shutil.rmtree(duplicate)
+                    removed_directories.add(duplicate)
 
     print("\nDirectories with partial file conflicts:")
     if not conflict_info:
@@ -109,8 +111,13 @@ def analyze_directories(root_dir: Path, remove_duplicates: bool, merge: bool, pr
             for source in sources:
                 print(f"  Merging {source.name} into {target.name}")
                 merge_directories(source, target)
-                print(f"  Deleting {source.name}")
-                shutil.rmtree(source)
+        # Situation where redirects can cause overlapping on 2 or more directories
+        for target, sources in merge_candidates.items():
+            for source in sources:
+                if source not in removed_directories:
+                    print(f"  Deleting {source.name}")
+                    shutil.rmtree(source)
+                    removed_directories.add(source)
 
     if print_unique:
         print("\nKeeping these unique directories:")

@@ -6,7 +6,7 @@ IMAGES_DIR="${DOWNLOAD_DIR}/images"
 ERROR_LOG="${DOWNLOAD_DIR}/failed_downloads.log"
 PROGRESS_LOG="${DOWNLOAD_DIR}/progress.log"
 SLEEP_DURATION=1.5
-MAX_PARALLEL=6  # Number of concurrent downloads
+MAX_PARALLEL=4  # Number of concurrent downloads
 
 # Create directories
 mkdir -p "$DOWNLOAD_DIR"
@@ -82,7 +82,7 @@ download_file() {
         return 0
     else
         rm -f "$tempfile" "${IMAGES_DIR}/${filename}" 2>/dev/null
-        echo "Failed: $url" >> "$ERROR_LOG"
+        echo "Failed to download ${url} as transformed ${transformed_url}" >> "$ERROR_LOG"
         return 1
     fi
 }

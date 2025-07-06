@@ -32,7 +32,8 @@ reduce_image() {
 
 get_file_size() {
     local file="$1"
-    echo $(ls -l "$file" | cut -d ' ' -f 8)
+    # echo $(ls -l "$file" | cut -d ' ' -f 8)
+    echo $(stat -f %z "$file")
 }
 
 # Check if the Swift binary exists
@@ -91,7 +92,8 @@ if [[ -f "$blacklist_file" ]]; then
         fi
     done < "$blacklist_file"
 else
-    echo "Warning: No blacklist.txt found in $pdf_dir"
+    echo "Warning: No blacklist.txt found in '$pdf_dir'. Create it."
+    touch "$blacklist_file"
     echo "Continuing without blacklist filtering"
 fi
 
@@ -204,33 +206,35 @@ done
 previous_results=(${(O)${(f)"$(find "${pdf_dir}" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z -r | tr '\0' '\n')"}})
 if (( ${#previous_results[@]} > 1 )); then  # Current + at least one previous
     # Sort by creation time (newest first) and get the second one (previous)
-    previous_dir=(${previous_results[2]})
     current_dir="${pdf_dir}/${current_datetime}"
+    for ((i=2; i<=${#previous_results[@]}; i++)); do
+        previous_dir=(${previous_results[i]})
 
-    echo "\nComparing with previous results in: ${previous_dir##*/}"
+        echo "\nComparing with previous results in: ${previous_dir##*/}"
 
-    # Find all PDFs in current directory
-    for pdf in "${current_dir}"/*.pdf(N); do
-        pdf_name="${pdf##*/}"
-        previous_pdf="${previous_dir}/${pdf_name}"
+        # Find all PDFs in current directory
+        for pdf in "${current_dir}"/*.pdf(N); do
+            pdf_name="${pdf##*/}"
+            previous_pdf="${previous_dir}/${pdf_name}"
 
-        if [[ -f "$previous_pdf" ]]; then
-            current_pdf_size=$(get_file_size "$pdf")
-            previous_pdf_size=$(get_file_size "$previous_pdf")
-            if [[ "$current_pdf_size" == "$previous_pdf_size" ]]; then
-                echo "  Removing duplicate: $pdf_name (identical to previous)"
-                rm "$pdf"
-            else
-                echo "  Keeping modified: $pdf_name (differs from previous)"
+            if [[ -f "$previous_pdf" ]]; then
+                current_pdf_size=$(get_file_size "$pdf")
+                previous_pdf_size=$(get_file_size "$previous_pdf")
+                if [[ "$current_pdf_size" == "$previous_pdf_size" ]]; then
+                    echo "  Removing duplicate: $pdf_name (identical to previous)"
+                    rm "$pdf"
+                else
+                    echo "  Keeping modified: $pdf_name (differs from previous)"
+                fi
             fi
-        fi
+        done
     done
 
     # Check if current directory is empty after comparison
     if [[ -z "$(ls -A "${current_dir}")" ]]; then
         echo "\nNo unique PDFs remain in current result - removing directory"
         rmdir "${current_dir}"
-        
+
         # Check if pdf_dir is now empty
         if [[ -z "$(ls -A "${pdf_dir}")" ]]; then
             echo "PDF output directory is empty - removing it"
